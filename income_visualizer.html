@@ -45,6 +45,7 @@ function compute() {
     const right = minMatch[2].trim();
     const kMatch = right.match(/([0-9.]+)\*y/);
     if(left==='x' && kMatch) minParams = parseFloat(kMatch[1]);
+    else if(left==='x' && right==='y') minParams = 1; // min(x,y)
   }
 
   // Detect linear utility
@@ -162,21 +163,16 @@ function compute() {
   function indiffCurve(uLevel, color){
     if(minParams){
       const k = minParams;
+      const corner_x = k*yCorner = uLevel / k; // yCorner
       const yCorner = uLevel;
       const xCorner = k*yCorner;
 
-      // Horizontal segment
-      const xsH = [0, xCorner, xmax];
-      const ysH = [yCorner, yCorner, yCorner];
+      // Horizontal: from corner to right
+      const horiz = { x: [xCorner, xmax], y: [yCorner, yCorner], mode:"lines", line:{color:color, width:2}, name:"Indiff Curve" };
+      // Vertical: from bottom to corner
+      const vert = { x: [xCorner, xCorner], y: [0, yCorner], mode:"lines", line:{color:color, width:2}, showlegend:false };
 
-      // Vertical segment
-      const xsV = [xCorner, xCorner, xCorner];
-      const ysV = [0, yCorner, ymax];
-
-      return [
-        {x: xsH, y: ysH, mode:"lines", name:"Indiff Curve", line:{color:color, width:1}},
-        {x: xsV, y: ysV, mode:"lines", name:"", line:{color:color, width:1, showlegend:false}}
-      ];
+      return [horiz, vert];
     } else if(linearParams){
       const xArr=[], yArr=[];
       const {a,b} = linearParams;
@@ -186,7 +182,7 @@ function compute() {
         const y = (uLevel - a*x)/b;
         if(y>=0 && y<=ymax){ xArr.push(x); yArr.push(y); }
       }
-      return [{x:xArr, y:yArr, mode:"lines", name:"Indiff Curve", line:{color:color, width:1}}];
+      return [{x:xArr, y:yArr, mode:"lines", line:{color:color, width:1}}];
     } else { // smooth
       const xArr=[], yArr=[];
       const steps = 300;
@@ -202,7 +198,7 @@ function compute() {
         }
         if(yCand!==null && yCand>=0 && yCand<=ymax){ xArr.push(x); yArr.push(yCand); }
       }
-      return [{x:xArr, y:yArr, mode:"lines", name:"Indiff Curve", line:{color:color, width:1}}];
+      return [{x:xArr, y:yArr, mode:"lines", line:{color:color, width:1}}];
     }
   }
 
