@@ -61,34 +61,33 @@ function compute() {
   if(!minParams && !linearParams) uExpr = math.compile(uStr);
 
   function maximizeUtility(p, m){
-  if(minParams){ // Leontief
-    const k = minParams;
-    const y = m / (p*k + 1);
-    const x = k*y;
-    return {x, y, u: Math.min(x, k*y)};
-  } else if(linearParams){ // Linear
-    const {a,b} = linearParams;
-    const slopeIndiff = a/b;
-    const slopeBudget = p/py;
-    let x,y,uVal;
-    if(slopeIndiff > slopeBudget){ x=m/p; y=0; } else { x=0; y=m/py; }
-    uVal = a*x + b*y;
-    return {x,y,u:uVal};
-  } else { // Smooth utility
-    const steps = 2000; // finer resolution for accuracy
-    let maxU=-Infinity, bestX=0, bestY=0;
-    for(let i=0;i<=steps;i++){
-      const x = (m/p)*(i/steps);
-      const y = m - p*x;
-      if(y<0) continue;
-      let uVal=-Infinity;
-      try { uVal = uExpr.evaluate({x,y}); } catch{}
-      if(uVal>maxU){ maxU=uVal; bestX=x; bestY=y; maxU=uVal; }
+    if(minParams){ // Leontief
+      const k = minParams;
+      const y = m / (p*k + 1);
+      const x = k*y;
+      return {x, y, u: Math.min(x, k*y)};
+    } else if(linearParams){ // Linear
+      const {a,b} = linearParams;
+      const slopeIndiff = a/b;
+      const slopeBudget = p/py;
+      let x,y,uVal;
+      if(slopeIndiff > slopeBudget){ x=m/p; y=0; } else { x=0; y=m/py; }
+      uVal = a*x + b*y;
+      return {x,y,u:uVal};
+    } else { // Smooth utility
+      const steps = 2000;
+      let maxU=-Infinity, bestX=0, bestY=0;
+      for(let i=0;i<=steps;i++){
+        const x = (m/p)*(i/steps);
+        const y = m - p*x;
+        if(y<0) continue;
+        let uVal=-Infinity;
+        try { uVal = uExpr.evaluate({x,y}); } catch{}
+        if(uVal>maxU){ maxU=uVal; bestX=x; bestY=y; maxU=uVal; }
+      }
+      return {x:bestX, y:bestY, u:maxU};
     }
-    return {x:bestX, y:bestY, u:maxU};
   }
-}
-
 
   // Compute A and C
   A = maximizeUtility(px, m);
@@ -104,8 +103,7 @@ function compute() {
       return {x, y, exp};
     } else if(linearParams){
       const {a,b} = linearParams;
-      // Indifference curve: a*x + b*y = uLevel
-      // Minimize px1*x + y => corner solution
+      let x,y;
       if(px1/b >= a/b){ x=0; y=uLevel/b; } else { x=uLevel/a; y=0; }
       const exp = px1*x + y;
       return {x,y,exp};
@@ -162,30 +160,56 @@ function compute() {
 
   // Indifference curves
   function indiffCurve(uLevel){
-  const xs=[], ys=[];
-  if(minParams){ // L-shaped curve
-    const k = minParams;
-    const ySeg = uLevel;          // horizontal segment
-    const xSeg = k*ySeg;
-    // Horizontal line: x from xSeg to xmax, y = ySeg
-    const hSteps = 50;
-    for(let i=0;i<=hSteps;i++){
-      xs.push(xSeg + (xmax-xSeg)*(i/hSteps));
-      ys.push(ySeg);
-    }
-    // Vertical line: x = xSeg, y from ySeg to ymax
-    const vSteps = 50;
-    for(let i=0;i<=vSteps;i++){
-      xs.push(xSeg);
-      ys.push(ySeg + (ymax-ySeg)*(i/vSteps));
-    }
-  } 
-  // ... keep smooth/linear cases unchanged ...
-  else if(linearParams){ /* existing code */ }
-  else { /* existing code */ }
-  return {x: xs, y: ys};
-}
+    const xs=[], ys=[];
+    if(minParams){ // L-shaped curve
+      const k = minParams;
+      const yCorner = uLevel;
+      const xCorner = k*yCorner;
 
+      // Horizontal segment
+      const hSteps = 50;
+      for(let i=0;i<=hSteps;i++){
+        xs.push(xCorner + (xmax - xCorner)*(i/hSteps));
+        ys.push(yCorner);
+      }
+
+      // Vertical segment
+      const vSteps = 50;
+      for(let i=0;i<=vSteps;i++){
+        xs.push(xCorner);
+        ys.push(yCorner + (ymax - yCorner)*(i/vSteps));
+      }
+    }
+    else if(linearParams){
+      const xArr = [], yArr = [];
+      const {a,b} = linearParams;
+      const steps = 300;
+      for(let i=0;i<=steps;i++){
+        const x = xmax*(i/steps);
+        const y = (uLevel - a*x)/b;
+        if(y>=0 && y<=ymax){ xArr.push(x); yArr.push(y); }
+      }
+      return {x: xArr, y: yArr};
+    }
+    else{
+      const xArr = [], yArr = [];
+      const steps = 300;
+      for(let i=0;i<=steps;i++){
+        const x = xmax*(i/steps);
+        let low = 0, high = ymax, yCand = null;
+        for(let iter=0;iter<20;iter++){
+          const yMid = (low+high)/2;
+          let uVal = -Infinity;
+          try{ uVal = uExpr.evaluate({x,y:yMid}); } catch{}
+          if(uVal>uLevel) high=yMid; else low=yMid;
+          if(Math.abs(uVal-uLevel)<0.001){ yCand = yMid; break; }
+        }
+        if(yCand!==null && yCand>=0 && yCand<=ymax){ xArr.push(x); yArr.push(yCand); }
+      }
+      return {x: xArr, y: yArr};
+    }
+    return {x: xs, y: ys};
+  }
 
   const icA = indiffCurve(A.u);
   const icC = indiffCurve(C.u);
