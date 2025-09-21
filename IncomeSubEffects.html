@@ -1,0 +1,190 @@
+<!-- File name: income_visualizer.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Income & Substitution Effects Visualizer</title>
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.11.0/math.min.js"></script>
+  
+<style>
+  body { 
+    font-family: Arial; 
+    margin: 20px; 
+    background-color: white; 
+    color: black;
+  }
+  input, label { 
+    margin: 4px; 
+    color: black; 
+  }
+  #plot { width: 800px; height: 600px; margin-top: 20px; }
+  .inputs { display: flex; flex-wrap: wrap; gap: 10px; }
+  .inputs label { width: 180px; color: black; }
+</style>
+
+</head>
+<body>
+  <h2>Income & Substitution Effects Visualizer</h2>
+
+  <div class="inputs">
+    <label>Utility function (u(x,y)): <input id="utility" value="x^0.5*y^0.5"></label>
+    <label>px (initial): <input type="number" id="px" value="1" step="0.1"></label>
+    <label>px (new): <input type="number" id="px2" value="2" step="0.1"></label>
+    <label>Income (m): <input type="number" id="m" value="3" step="0.1"></label>
+    <button onclick="compute()">Compute & Plot</button>
+  </div>
+
+  <div id="plot"></div>
+  <div id="results"></div>
+
+<script>
+function compute() {
+  const uStr = document.getElementById("utility").value.trim();
+  const px = parseFloat(document.getElementById("px").value);
+  const px2 = parseFloat(document.getElementById("px2").value);
+  const py = 1; // fixed
+  const m = parseFloat(document.getElementById("m").value);
+
+  const isMin = uStr.replace(/\s+/g, '') === "min(x,y)";
+  let A, B, C, newm;
+
+  // Try to detect Cobb–Douglas: x^a * y^b
+  const cdMatch = uStr.match(/x\^([0-9.]+)\*y\^([0-9.]+)/);
+  let cdParams = null;
+  if (cdMatch) {
+    cdParams = { a: parseFloat(cdMatch[1]), b: parseFloat(cdMatch[2]) };
+  }
+
+  // Compile once if needed
+  let uExpr = null;
+  if (!cdParams && !isMin) {
+    try { uExpr = math.compile(uStr); } catch {}
+  }
+
+  // Demand function for Cobb–Douglas
+  function cobbDouglas(px, py, m, a, b) {
+    const x = (a / (a + b)) * (m / px);
+    const y = (b / (a + b)) * (m / py);
+    return { x, y, u: Math.pow(x, a) * Math.pow(y, b) };
+  }
+
+  // Fallback maximize (coarse search)
+  function maximize(px, py, m) {
+    let maxU = -Infinity, best = [0, 0];
+    const steps = 200; // much coarser
+    const dx = (m / px) / steps;
+    for (let i = 0; i <= steps; i++) {
+      const x = i * dx;
+      const y = (m - px * x) / py;
+      if (y < 0) continue;
+      const u = uExpr.evaluate({ x, y });
+      if (u > maxU) { maxU = u; best = [x, y]; }
+    }
+    return { x: best[0], y: best[1], u: maxU };
+  }
+
+  if (isMin) {
+    const xA = m / (px + py);
+    A = { x: xA, y: xA, u: xA };
+    newm = xA * (px2 + py);
+    B = { x: xA, y: xA, u: xA };
+
+    // Final bundle with brute force but coarse
+    C = maximize(px2, py, m);
+  } else if (cdParams) {
+    const { a, b } = cdParams;
+    A = cobbDouglas(px, py, m, a, b);
+    C = cobbDouglas(px2, py, m, a, b);
+
+    // compensated income
+    newm = m * (px2 / px); // approx CV adjustment
+    B = cobbDouglas(px2, py, newm, a, b);
+  } else {
+    A = maximize(px, py, m);
+    C = maximize(px2, py, m);
+
+    // Compensated income: search with coarse steps
+    newm = m;
+    let found = false;
+    for (let z = 0; z <= m * 2; z += m / 100) {
+      const test = maximize(px2, py, z);
+      if (Math.abs(test.u - A.u) < 0.01) {
+        newm = z; found = true; break;
+      }
+    }
+    B = maximize(px2, py, newm);
+  }
+
+  const xInts = [m / px, m / px2, newm / px2];
+  const yInts = [m / py, newm / py];
+
+  const maxX = 1.1 * Math.max(...xInts, A.x, B.x, C.x);
+  const maxY = 1.1 * Math.max(...yInts, A.y, B.y, C.y);
+
+  const budgetLine = (px, py, m, label, color) => ({
+    x: [0, m / px],
+    y: [m / py, 0],
+    mode: "lines",
+    type: "scatter",
+    name: label,
+    line: { dash: "dot", color }
+  });
+
+  const plotData = [
+    budgetLine(px, py, m, "Initial Budget", "blue"),
+    budgetLine(px2, py, m, "New Budget", "orange"),
+    budgetLine(px2, py, newm, "Compensated Budget", "green"),
+    { x: [A.x], y: [A.y], mode: "markers+text", text: ["A"], name: "Initial", marker: { size: 10, color: "blue" } },
+    { x: [B.x], y: [B.y], mode: "markers+text", text: ["B"], name: "Compensated", marker: { size: 10, color: "green" } },
+    { x: [C.x], y: [C.y], mode: "markers+text", text: ["C"], name: "Final", marker: { size: 10, color: "orange" } }
+  ];
+
+  // Indifference curves
+  function indiffCurve(uLevel) {
+    const x = [], y = [];
+    const steps = 200;
+    for (let i = 1; i <= steps; i++) {
+      const xi = (maxX / steps) * i;
+      let yi;
+      if (cdParams) {
+        const { a, b } = cdParams;
+        yi = Math.pow(uLevel / Math.pow(xi, a), 1 / b);
+      } else {
+        yi = null;
+      }
+      if (yi && yi > 0 && yi <= maxY) {
+        x.push(xi); y.push(yi);
+      }
+    }
+    return { x, y };
+  }
+
+  const icA = indiffCurve(A.u);
+  const icC = indiffCurve(C.u);
+
+  if (icA.x.length) plotData.push({ x: icA.x, y: icA.y, mode: "lines", name: "Indiff Curve A", line: { color: "blue", width: 1 } });
+  if (icC.x.length) plotData.push({ x: icC.x, y: icC.y, mode: "lines", name: "Indiff Curve C", line: { color: "orange", width: 1 } });
+
+  Plotly.newPlot("plot", plotData, {
+    title: "Income & Substitution Effects",
+    xaxis: { title: "x", range: [0, maxX], scaleratio: 1, scaleanchor: "y" },
+    yaxis: { title: "y", range: [0, maxY] }
+  });
+
+  const subsEff = isMin ? 0 : (B.x - A.x);
+  const incomeEff = C.x - B.x;
+  const cv = (m - newm) / py;
+
+  document.getElementById("results").innerHTML = `
+    <p><b>A:</b> (${A.x.toFixed(3)}, ${A.y.toFixed(3)})<br/>
+    <b>B:</b> (${B.x.toFixed(3)}, ${B.y.toFixed(3)})<br/>
+    <b>C:</b> (${C.x.toFixed(3)}, ${C.y.toFixed(3)})<br/>
+    <b>Substitution Effect:</b> ${subsEff.toFixed(3)}<br/>
+    <b>Income Effect:</b> ${incomeEff.toFixed(3)}<br/>
+    <b>Compensating Variation:</b> ${cv.toFixed(3)}</p>`;
+}
+</script>
+
+</body>
+</html>
