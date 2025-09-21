@@ -61,34 +61,34 @@ function compute() {
   if(!minParams && !linearParams) uExpr = math.compile(uStr);
 
   function maximizeUtility(p, m){
-    if(minParams){
-      const k = minParams;
-      const y = m / (p*k + 1);
-      const x = k*y;
-      return {x, y, u: Math.min(x, k*y)};
-    } else if(linearParams){
-      const {a,b} = linearParams;
-      const slopeIndiff = a/b;
-      const slopeBudget = p/py;
-      let x,y,uVal;
-      if(slopeIndiff > slopeBudget){ x=m/p; y=0; } else { x=0; y=m/py; }
-      uVal = a*x + b*y;
-      return {x,y,u:uVal};
-    } else {
-      let maxU=-Infinity, best=[0,0];
-      const steps = 500;
-      for(let i=0;i<=steps;i++){
-        const x = (m/p)*(i/steps);
-        const y = m - p*x;
-        if(y<0) continue;
-        let uVal = -Infinity;
-        try { uVal = uExpr.evaluate({x,y}); } catch{}
-        if(uVal>maxU){ maxU=uVal; best=[x,y]; }
-      }
-      const [x,y] = best;
-      return {x,y,u:maxU};
+  if(minParams){ // Leontief
+    const k = minParams;
+    const y = m / (p*k + 1);
+    const x = k*y;
+    return {x, y, u: Math.min(x, k*y)};
+  } else if(linearParams){ // Linear
+    const {a,b} = linearParams;
+    const slopeIndiff = a/b;
+    const slopeBudget = p/py;
+    let x,y,uVal;
+    if(slopeIndiff > slopeBudget){ x=m/p; y=0; } else { x=0; y=m/py; }
+    uVal = a*x + b*y;
+    return {x,y,u:uVal};
+  } else { // Smooth utility
+    const steps = 2000; // finer resolution for accuracy
+    let maxU=-Infinity, bestX=0, bestY=0;
+    for(let i=0;i<=steps;i++){
+      const x = (m/p)*(i/steps);
+      const y = m - p*x;
+      if(y<0) continue;
+      let uVal=-Infinity;
+      try { uVal = uExpr.evaluate({x,y}); } catch{}
+      if(uVal>maxU){ maxU=uVal; bestX=x; bestY=y; maxU=uVal; }
     }
+    return {x:bestX, y:bestY, u:maxU};
   }
+}
+
 
   // Compute A and C
   A = maximizeUtility(px, m);
