@@ -36,66 +36,97 @@ function compute() {
   const py = 1;
   const m = parseFloat(document.getElementById("m").value);
 
-  const isMin = uStr.replace(/\s+/g,'') === "min(x,y)";
   let A, B, C, newm;
 
-  // Cobb-Douglas detection
-  const cdMatch = uStr.match(/x\^([0-9.]+)\*y\^([0-9.]+)/);
-  let cdParams = null;
-  if(cdMatch) cdParams = { a: parseFloat(cdMatch[1]), b: parseFloat(cdMatch[2]) };
+  // Detect min-type utility
+  const minMatch = uStr.match(/min\(([^,]+),([^,]+)\)/);
+  let minParams = null;
+  if(minMatch) {
+    const left = minMatch[1].trim();
+    const right = minMatch[2].trim();
+    // Check if right is of form k*y
+    const kMatch = right.match(/([0-9.]+)\*y/);
+    if(left==='x' && kMatch) minParams = parseFloat(kMatch[1]);
+  }
+
+  // Compile smooth utilities
   let uExpr = null;
-  if(!cdParams && !isMin) uExpr = math.compile(uStr);
+  if(!minParams) uExpr = math.compile(uStr);
 
-  function cobbDouglas(px, py, m, a, b) {
-    const x = (a / (a + b)) * (m / px);
-    const y = (b / (a + b)) * (m / py);
-    return { x, y, u: Math.pow(x,a)*Math.pow(y,b) };
-  }
-
-  function maximize(px, py, m) {
-    if(cdParams) return cobbDouglas(px, py, m, cdParams.a, cdParams.b);
-    if(isMin) return { x: m/(px+py), y: m/(px+py), u: m/(px+py) };
-    let maxU=-Infinity, best=[0,0];
-    const steps = 200;
-    for(let i=0;i<=steps;i++){
-      const x = (m/px)*(i/steps);
-      const y = (m - px*x)/py;
-      if(y<0) continue;
-      let u = 0;
-      try { u = uExpr.evaluate({x,y}); } catch { u = -Infinity; }
-      if(u>maxU){ maxU=u; best=[x,y]; }
+  // Helper: maximize u(x,m-px*x) over x>=0
+  function maximizeUtility(p, m) {
+    if(minParams) {
+      const k = minParams;
+      const y = m / (p*k + 1);
+      const x = k * y;
+      return {x, y, u: Math.min(x, k*y)};
+    } else {
+      let maxU=-Infinity, best=[0,0];
+      const steps = 500;
+      for(let i=0;i<=steps;i++){
+        const x = (m/p)*(i/steps);
+        const y = m - p*x;
+        if(y<0) continue;
+        let uVal = -Infinity;
+        try { uVal = uExpr.evaluate({x,y}); } catch {}
+        if(uVal>maxU){ maxU=uVal; best=[x,y]; }
+      }
+      const [x,y] = best;
+      return {x,y,u:maxU};
     }
-    return { x: best[0], y: best[1], u: maxU };
   }
 
-  // Compute A, C
-  A = maximize(px, py, m);
-  C = maximize(px2, py, m);
+  // Compute A and C
+  A = maximizeUtility(px, m);
+  C = maximizeUtility(px2, m);
 
-  // Compensated bundle B
-  if(cdParams){
-    const {a,b} = cdParams;
-    // Original utility
-    const uA = Math.pow(A.x,a) * Math.pow(A.y,b);
-    // Compensated income
-    newm = Math.pow(uA,1/(a+b)) * (a+b) * Math.pow(px2**a * py**b, 1/(a+b)) / Math.pow(a**a * b**b,1/(a+b));
-    B = cobbDouglas(px2, py, newm, a, b);
-  } else if(isMin){
-    newm = m;
-    B = {...A};
-  } else {
-    newm = m;
-    let found=false;
-    for(let z=0; z<=m*2; z+=m/100){
-      let test = maximize(px2, py, z);
-      if(Math.abs(test.u - A.u) < 0.01){ newm=z; found=true; break; }
+  // Compute compensated point B
+  function findCompensated(px1, uLevel) {
+    if(minParams) {
+      const k = minParams;
+      // Indifference curve: x = k*y or y = x/k
+      // Minimize expenditure p1*x + y => minimize x*(p1 + 1/k)
+      const y = uLevel / k;
+      const x = k*y;
+      const exp = px1*x + y;
+      return {x, y, exp};
+    } else {
+      let bestExp=Infinity, bestX=0, bestY=0;
+      const steps = 500;
+      for(let i=0;i<=steps;i++){
+        const x = (C.x*2)*(i/steps);
+        let yCandidate = null;
+        try { 
+          const y0 = 0, y1 = C.y*2;
+          let low = y0, high = y1;
+          for(let iter=0; iter<20; iter++){
+            const yMid = (low+high)/2;
+            const uVal = uExpr.evaluate({x,y:yMid});
+            if(uVal > uLevel) high=yMid; else low=yMid;
+            if(Math.abs(uVal-uLevel)<0.01){ yCandidate=yMid; break;}
+          }
+        } catch {}
+        if(yCandidate!==null && yCandidate>=0){
+          const exp = px1*x + yCandidate;
+          if(exp<bestExp){ bestExp=exp; bestX=x; bestY=yCandidate; }
+        }
+      }
+      return {x:bestX, y:bestY, exp:bestExp};
     }
-    B = maximize(px2, py, newm);
   }
 
-  // Axis limits
-  let maxX = Math.max(A.x,B.x,C.x,m/Math.min(px,px2))*1.1;
-  let maxY = Math.max(A.y,B.y,C.y,m/py)*1.1;
+  const Bdata = findCompensated(px2, A.u);
+  B = {x:Bdata.x, y:Bdata.y, u:A.u};
+  newm = Bdata.exp;
+
+  // Compute substitution and income effects
+  const SE = B.x - A.x;
+  const IE = C.x - B.x;
+  const CV = m - newm;
+
+  // Determine plotting limits
+  let maxX = Math.max(A.x,B.x,C.x)*1.2;
+  let maxY = Math.max(A.y,B.y,C.y)*1.2;
 
   // Budget lines
   const budgetLine = (px, py, m, label, color) => ({
@@ -112,28 +143,30 @@ function compute() {
     {x:[C.x], y:[C.y], mode:"markers+text", text:["C"], name:"Final", marker:{size:10,color:"orange"}}
   ];
 
-  // Indifference curves
+  // Indifference curve generation
   function indiffCurve(uLevel) {
-    const x=[], y=[];
-    const steps=200;
-    for(let i=1;i<=steps;i++){
-      const xi = (maxX/steps)*i;
-      let yi = null;
-      if(cdParams){
-        yi = Math.pow(uLevel/Math.pow(xi,cdParams.a),1/cdParams.b);
-      } else if(!isMin){
-        let yLow=0, yHigh=maxY;
-        for(let iter=0;iter<20;iter++){
-          const yMid = (yLow+yHigh)/2;
-          let uVal;
-          try { uVal = uExpr.evaluate({x:xi, y:yMid}); } catch { uVal=-Infinity; }
-          if(uVal>uLevel) yHigh=yMid; else yLow=yMid;
-          if(Math.abs(uVal-uLevel)<0.01){ yi=yMid; break; }
+    const xs=[], ys=[];
+    const steps=300;
+    for(let i=0;i<=steps;i++){
+      const x = maxX*(i/steps);
+      let y=null;
+      if(minParams){
+        y = uLevel / minParams;
+      } else {
+        // Find y numerically
+        let low=0, high=maxY, yCand=null;
+        for(let iter=0; iter<20; iter++){
+          const yMid = (low+high)/2;
+          let uVal = -Infinity;
+          try { uVal = uExpr.evaluate({x,y:yMid}); } catch{}
+          if(uVal > uLevel) high=yMid; else low=yMid;
+          if(Math.abs(uVal-uLevel)<0.01){ yCand=yMid; break;}
         }
-      } else { yi = uLevel; }
-      if(yi!==null && yi>0 && yi<=maxY){ x.push(xi); y.push(yi); }
+        y = yCand;
+      }
+      if(y!==null && y>=0) { xs.push(x); ys.push(y); }
     }
-    return {x,y};
+    return {x:xs, y:ys};
   }
 
   const icA = indiffCurve(A.u);
@@ -143,21 +176,17 @@ function compute() {
 
   Plotly.newPlot("plot", plotData,{
     title:"Income & Substitution Effects",
-    xaxis:{title:"x",range:[0,maxX],scaleratio:1,scaleanchor:"y"},
-    yaxis:{title:"y",range:[0,maxY]}
+    xaxis:{title:"x", range:[0,maxX]},
+    yaxis:{title:"y", range:[0,maxY]}
   });
-
-  const subsEff = isMin?0:(B.x-A.x);
-  const incomeEff = C.x-B.x;
-  const cv = (m-newm)/py;
 
   document.getElementById("results").innerHTML=`
     <p><b>A:</b> (${A.x.toFixed(3)}, ${A.y.toFixed(3)})<br/>
     <b>B:</b> (${B.x.toFixed(3)}, ${B.y.toFixed(3)})<br/>
     <b>C:</b> (${C.x.toFixed(3)}, ${C.y.toFixed(3)})<br/>
-    <b>Substitution Effect:</b> ${subsEff.toFixed(3)}<br/>
-    <b>Income Effect:</b> ${incomeEff.toFixed(3)}<br/>
-    <b>Compensating Variation:</b> ${cv.toFixed(3)}</p>`;
+    <b>Substitution Effect:</b> ${SE.toFixed(3)}<br/>
+    <b>Income Effect:</b> ${IE.toFixed(3)}<br/>
+    <b>Compensating Variation:</b> ${CV.toFixed(3)}</p>`;
 }
 </script>
 </body>
