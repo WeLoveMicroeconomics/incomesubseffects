@@ -72,16 +72,20 @@ function compute() {
   A = maximize(px, py, m);
   C = maximize(px2, py, m);
 
-  // Compensated income for B
-  if(cdParams) {
-    newm = m * (px2/px);
-    B = cobbDouglas(px2, py, newm, cdParams.a, cdParams.b);
-  } else if(isMin) {
+  // Compensated bundle B
+  if(cdParams){
+    const {a,b} = cdParams;
+    // Original utility
+    const uA = Math.pow(A.x,a) * Math.pow(A.y,b);
+    // Compensated income
+    newm = Math.pow(uA,1/(a+b)) * (a+b) * Math.pow(px2**a * py**b, 1/(a+b)) / Math.pow(a**a * b**b,1/(a+b));
+    B = cobbDouglas(px2, py, newm, a, b);
+  } else if(isMin){
     newm = m;
-    B = { ...A };
+    B = {...A};
   } else {
     newm = m;
-    let found = false;
+    let found=false;
     for(let z=0; z<=m*2; z+=m/100){
       let test = maximize(px2, py, z);
       if(Math.abs(test.u - A.u) < 0.01){ newm=z; found=true; break; }
@@ -89,7 +93,7 @@ function compute() {
     B = maximize(px2, py, newm);
   }
 
-  // Determine axis limits
+  // Axis limits
   let maxX = Math.max(A.x,B.x,C.x,m/Math.min(px,px2))*1.1;
   let maxY = Math.max(A.y,B.y,C.y,m/py)*1.1;
 
@@ -118,7 +122,6 @@ function compute() {
       if(cdParams){
         yi = Math.pow(uLevel/Math.pow(xi,cdParams.a),1/cdParams.b);
       } else if(!isMin){
-        // Numerical root-finding in y
         let yLow=0, yHigh=maxY;
         for(let iter=0;iter<20;iter++){
           const yMid = (yLow+yHigh)/2;
@@ -127,9 +130,7 @@ function compute() {
           if(uVal>uLevel) yHigh=yMid; else yLow=yMid;
           if(Math.abs(uVal-uLevel)<0.01){ yi=yMid; break; }
         }
-      } else {
-        yi = uLevel; // for min(x,y)
-      }
+      } else { yi = uLevel; }
       if(yi!==null && yi>0 && yi<=maxY){ x.push(xi); y.push(yi); }
     }
     return {x,y};
