@@ -170,7 +170,7 @@ function compute() {
       // Horizontal segment
       const horiz = { x:[xCorner,xmax], y:[yCorner,yCorner], mode:"lines", line:{color:color, width:2}, name:"Indiff Curve" };
       // Vertical segment
-      const vert = { x:[xCorner,xCorner], y:[0,yCorner], mode:"lines", line:{color:color, width:2}, showlegend:false };
+      const vert = { x:[xCorner,xCorner], y:[yCorner,ymax], mode:"lines", line:{color:color, width:2}, showlegend:false };
       return [horiz, vert];
     } else if(linearParams){
       const xArr=[], yArr=[];
