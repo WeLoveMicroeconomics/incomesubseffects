@@ -37,15 +37,17 @@ function compute() {
 
   let A, B, C, m1;
 
-  // Detect min-type utility
+  // Detect min-type utility (Leontief)
   const minMatch = uStr.match(/min\(([^,]+),([^,]+)\)/);
   let minParams = null;
   if(minMatch){
     const left = minMatch[1].trim();
     const right = minMatch[2].trim();
-    const kMatch = right.match(/([0-9.]+)\*y/);
-    if(left==='x' && kMatch) minParams = parseFloat(kMatch[1]);
-    else if(left==='x' && right==='y') minParams = 1; // min(x,y)
+    if(right==='y') minParams = 1; // min(x,y)
+    else {
+      const kMatch = right.match(/([0-9.]+)\*y/);
+      if(left==='x' && kMatch) minParams = parseFloat(kMatch[1]); // min(x,k*y)
+    }
   }
 
   // Detect linear utility
@@ -75,7 +77,7 @@ function compute() {
       if(slopeIndiff > slopeBudget){ x=m/p; y=0; } else { x=0; y=m/py; }
       uVal = a*x + b*y;
       return {x,y,u:uVal};
-    } else { // Smooth utility
+    } else { // Smooth
       const steps = 2000;
       let maxU=-Infinity, bestX=0, bestY=0;
       for(let i=0;i<=steps;i++){
@@ -98,7 +100,7 @@ function compute() {
   function findCompensated(px1, uLevel){
     if(minParams){
       const k = minParams;
-      const y = uLevel / k;
+      const y = uLevel;
       const x = k*y;
       const exp = px1*x + y;
       return {x, y, exp};
@@ -163,15 +165,12 @@ function compute() {
   function indiffCurve(uLevel, color){
     if(minParams){
       const k = minParams;
-      const corner_x = k*yCorner = uLevel / k; // yCorner
       const yCorner = uLevel;
       const xCorner = k*yCorner;
-
-      // Horizontal: from corner to right
-      const horiz = { x: [xCorner, xmax], y: [yCorner, yCorner], mode:"lines", line:{color:color, width:2}, name:"Indiff Curve" };
-      // Vertical: from bottom to corner
-      const vert = { x: [xCorner, xCorner], y: [0, yCorner], mode:"lines", line:{color:color, width:2}, showlegend:false };
-
+      // Horizontal segment
+      const horiz = { x:[xCorner,xmax], y:[yCorner,yCorner], mode:"lines", line:{color:color, width:2}, name:"Indiff Curve" };
+      // Vertical segment
+      const vert = { x:[xCorner,xCorner], y:[0,yCorner], mode:"lines", line:{color:color, width:2}, showlegend:false };
       return [horiz, vert];
     } else if(linearParams){
       const xArr=[], yArr=[];
