@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Income & Substitution Effects Visualizer</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.11.0/math.min.js"></script>
+<style>
+body { font-family: Arial; margin: 20px; background-color: white; color: black; }
+input, label { margin: 4px; color: black; }
+#plot { width: 800px; height: 600px; margin-top: 20px; }
+.inputs { display: flex; flex-wrap: wrap; gap: 10px; }
+.inputs label { width: 180px; color: black; }
+</style>
+</head>
+<body>
+<h2>Income & Substitution Effects Visualizer</h2>
+
+<div class="inputs">
+  <label>Utility function (u(x,y)): <input id="utility" value="x^0.5*y^0.5"></label>
+  <label>px (initial): <input type="number" id="px" value="1" step="0.1"></label>
+  <label>px (new): <input type="number" id="px2" value="2" step="0.1"></label>
+  <label>Income (m): <input type="number" id="m" value="3" step="0.1"></label>
+  <button onclick="compute()">Compute & Plot</button>
+</div>
+
+<div id="plot"></div>
+<div id="results"></div>
+
+<script>
+function compute() {
+  const uStr = document.getElementById("utility").value.trim();
+  const px = parseFloat(document.getElementById("px").value);
+  const px2 = parseFloat(document.getElementById("px2").value);
+  const py = 1;
+  const m = parseFloat(document.getElementById("m").value);
+
+  let A, B, C, m1;
+
+  // Detect min-type utility
+  const minMatch = uStr.match(/min\(([^,]+),([^,]+)\)/);
+  let minParams = null;
+  if(minMatch){
+    const left = minMatch[1].trim();
+    const right = minMatch[2].trim();
+    const kMatch = right.match(/([0-9.]+)\*y/);
+    if(left==='x' && kMatch) minParams = parseFloat(kMatch[1]);
+  }
+
+  // Detect linear utility
+  const linearMatch = uStr.match(/^\s*([0-9.]*)\*?x\s*\+\s*([0-9.]*)\*?y\s*$/);
+  let linearParams = null;
+  if(linearMatch){
+    const a = parseFloat(linearMatch[1]) || 1;
+    const b = parseFloat(linearMatch[2]) || 1;
+    linearParams = {a,b};
+  }
+
+  // Compile smooth utility
+  let uExpr = null;
+  if(!minParams && !linearParams) uExpr = math.compile(uStr);
+
+  function maximizeUtility(p, m){
+    if(minParams){ // Leontief
+      const k = minParams;
+      const y = m / (p*k + 1);
+      const x = k*y;
+      return {x, y, u: Math.min(x, k*y)};
+    } else if(linearParams){ // Linear
+      const {a,b} = linearParams;
+      const slopeIndiff = a/b;
+      const slopeBudget = p/py;
+      let x,y,uVal;
+      if(slopeIndiff > slopeBudget){ x=m/p; y=0; } else { x=0; y=m/py; }
+      uVal = a*x + b*y;
+      return {x,y,u:uVal};
+    } else { // Smooth utility
+      const steps = 2000;
+      let maxU=-Infinity, bestX=0, bestY=0;
+      for(let i=0;i<=steps;i++){
+        const x = (m/p)*(i/steps);
+        const y = m - p*x;
+        if(y<0) continue;
+        let uVal=-Infinity;
+        try { uVal = uExpr.evaluate({x,y}); } catch{}
+        if(uVal>maxU){ maxU=uVal; bestX=x; bestY=y; maxU=uVal; }
+      }
+      return {x:bestX, y:bestY, u:maxU};
+    }
+  }
+
+  // Compute A and C
+  A = maximizeUtility(px, m);
+  C = maximizeUtility(px2, m);
+
+  // Compensated point B
+  function findCompensated(px1, uLevel){
+    if(minParams){
+      const k = minParams;
+      const y = uLevel / k;
+      const x = k*y;
+      const exp = px1*x + y;
+      return {x, y, exp};
+    } else if(linearParams){
+      const {a,b} = linearParams;
+      let x,y;
+      if(px1/b >= a/b){ x=0; y=uLevel/b; } else { x=uLevel/a; y=0; }
+      const exp = px1*x + y;
+      return {x,y,exp};
+    } else {
+      let bestExp=Infinity, bestX=0, bestY=0;
+      const steps = 500;
+      for(let i=0;i<=steps;i++){
+        const x = (Math.max(A.x,C.x)*2)*(i/steps);
+        let yCand=null;
+        let low=0, high=Math.max(A.y,C.y)*2;
+        for(let iter=0; iter<20; iter++){
+          const yMid = (low+high)/2;
+          let uVal=-Infinity;
+          try { uVal = uExpr.evaluate({x,y:yMid}); } catch{}
+          if(uVal>uLevel) high=yMid; else low=yMid;
+          if(Math.abs(uVal-uLevel)<0.01){ yCand = yMid; break; }
+        }
+        if(yCand!==null && yCand>=0){
+          const exp = px1*x + yCand;
+          if(exp<bestExp){ bestExp=exp; bestX=x; bestY=yCand; }
+        }
+      }
+      return {x:bestX, y:bestY, exp:bestExp};
+    }
+  }
+
+  const Bdata = findCompensated(px2, A.u);
+  B = {x:Bdata.x, y:Bdata.y, u:A.u};
+  m1 = Bdata.exp;
+
+  // Substitution and income effects
+  const SE = B.x - A.x;
+  const IE = C.x - B.x;
+  const CV = m - m1;
+
+  // Axis limits
+  const xmax = 1.05*Math.max(m/px, m/px2, m1/px, m1/px2);
+  const ymax = 1.05*Math.max(m, m1);
+
+  // Budget lines
+  const budgetLine = (px, py, m, label, color) => ({
+    x:[0,m/px], y:[m/py,0], mode:"lines", type:"scatter",
+    name:label, line:{dash:"dot", color}
+  });
+
+  const plotData = [
+    budgetLine(px, py, m, "Initial Budget", "blue"),
+    budgetLine(px2, py, m, "New Budget", "orange"),
+    budgetLine(px2, py, m1, "Compensated Budget", "green"),
+    {x:[A.x], y:[A.y], mode:"markers+text", text:["A"], name:"Initial", marker:{size:10,color:"blue"}},
+    {x:[B.x], y:[B.y], mode:"markers+text", text:["B"], name:"Compensated", marker:{size:10,color:"green"}},
+    {x:[C.x], y:[C.y], mode:"markers+text", text:["C"], name:"Final", marker:{size:10,color:"orange"}}
+  ];
+
+  // Indifference curves
+  function indiffCurve(uLevel, color){
+    if(minParams){ // L-shaped curve
+      const k = minParams;
+      const yCorner = uLevel;
+      const xCorner = k*yCorner;
+
+      // Horizontal segment trace
+      const hSteps = 50;
+      const xsH=[], ysH=[];
+      for(let i=0;i<=hSteps;i++){
+        xsH.push(xCorner + (xmax - xCorner)*(i/hSteps));
+        ysH.push(yCorner);
+      }
+
+      // Vertical segment trace
+      const vSteps = 50;
+      const xsV=[], ysV=[];
+      for(let i=0;i<=vSteps;i++){
+        xsV.push(xCorner);
+        ysV.push(yCorner + (ymax - yCorner)*(i/vSteps));
+      }
+
+      return [
+        {x: xsH, y: ysH, mode:"lines", name:"Indiff Curve", line:{color:color, width:1}},
+        {x: xsV, y: ysV, mode:"lines", name:"", line:{color:color, width:1, showlegend:false}}
+      ];
+    }
+    else if(linearParams){
+      const xArr=[], yArr=[];
+      const {a,b} = linearParams;
+      const steps = 300;
+      for(let i=0;i<=steps;i++){
+        const x = xmax*(i/steps);
+        const y = (uLevel - a*x)/b;
+        if(y>=0 && y<=ymax){ xArr.push(x); yArr.push(y); }
+      }
+      return [{x:xArr, y:yArr, mode:"lines", name:"Indiff Curve", line:{color:color, width:1}}];
+    }
+    else{ // smooth
+      const xArr=[], yArr=[];
+      const steps = 300;
+      for(let i=0;i<=steps;i++){
+        const x = xmax*(i/steps);
+        let low=0, high=ymax, yCand=null;
+        for(let iter=0;iter<20;iter++){
+          const yMid=(low+high)/2;
+          let uVal=-Infinity;
+          try{ uVal = uExpr.evaluate({x,y:yMid}); } catch{}
+          if(uVal>uLevel) high=yMid; else low=yMid;
+          if(Math.abs(uVal-uLevel)<0.001){ yCand=yMid; break; }
+        }
+        if(yCand!==null && yCand>=0 && yCand<=ymax){ xArr.push(x); yArr.push(yCand); }
+      }
+      return [{x:xArr, y:yArr, mode:"lines", name:"Indiff Curve", line:{color:color, width:1}}];
+    }
+  }
+
+  // Add indifference curves
+  indiffCurve(A.u,"blue").forEach(tr=>plotData.push(tr));
+  indiffCurve(C.u,"orange").forEach(tr=>plotData.push(tr));
+
+  Plotly.newPlot("plot", plotData,{
+    title:"Income & Substitution Effects",
+    xaxis:{title:"x", range:[0,xmax]},
+    yaxis:{title:"y", range:[0,ymax]}
+  });
+
+  document.getElementById("results").innerHTML=`
+    <p><b>A:</b> (${A.x.toFixed(3)}, ${A.y.toFixed(3)})<br/>
+    <b>B:</b> (${B.x.toFixed(3)}, ${B.y.toFixed(3)})<br/>
+    <b>C:</b> (${C.x.toFixed(3)}, ${C.y.toFixed(3)})<br/>
+    <b>Substitution Effect:</b> ${SE.toFixed(3)}<br/>
+    <b>Income Effect:</b> ${IE.toFixed(3)}<br/>
+    <b>Compensating Variation:</b> ${CV.toFixed(3)}</p>`;
+}
+</script>
+</body>
+</html>
